@@ -1,0 +1,13 @@
+- include: clues_im.yml
+
+- include: slurm_specific.yml
+  when: "lrms == 'slurm'"
+  
+- include: torque_specific.yml
+  when: "lrms == 'torque'"
+
+- include: sge_specific.yml
+  when: "lrms == 'sge'"
+
+# Start clues service    
+- service: name=clues state=started

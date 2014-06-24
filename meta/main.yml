@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: "Amanda Calatrava"
+  description: Ansible role to install EC3 functionality (CLUES + IM + LRMS plugins)
+  license: MIT
+  min_ansible_version: 1.4
+  version: 0.1
+  categories:
+    - clustering
+  dependencies: []

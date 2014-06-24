@@ -1,0 +1,101 @@
+    - get_url: url={{REPOSITORY}}/{{item}} dest=/tmp/{{item}}
+      with_items:
+      - "{{CLUES_FILE}}.tar.gz"
+      - "{{CLOUD_CONN_FILE}}.tar.gz"
+      - "{{IM_FILE}}.tar.gz"
+      # LRMS Specific files
+      - "{{PLUGIN_FILE}}.tar.gz"
+
+    - name: create epel.repo
+      action: template src=utils/templates/epel-es.repo dest=/etc/yum.repos.d/epel.repo
+      when: redhat_os
+
+    # CLUES and IM requirements
+    - name: Apt install CLUES and IM requirements in Deb system
+      action: apt pkg=python-sqlite,python-paramiko,python-yaml,python-soappy,python-boto
+      when: debian_os
+      
+    - name: Apt install CLUES and IM requirements in REL system
+      action: yum pkg=python-sqlite,python-paramiko,PyYAML,SOAPpy,python-boto
+      when: redhat_os
+
+    # General tasks
+    # Users creation
+    - user: name={{item.name}} password={{item.password}} generate_ssh_key=yes shell=/bin/bash
+      with_items: USERS
+    - local_action: shell cp /home/{{item.name}}/.ssh/id_rsa.pub /tmp/{{item.name}}_authorized_keys creates=/tmp/{{item.name}}_authorized_keys
+      with_items: USERS
+    - local_action: copy src=/tmp/{{item.name}}_authorized_keys dest=/home/{{item.name}}/.ssh/authorized_keys owner={{item.name}} group={{item.name}} mode=0644
+      with_items: USERS
+    - template: src=utils/templates/ssh_known_hosts.conf dest=/etc/ssh/ssh_known_hosts
+
+    # Manage the /etc/hosts file
+    - lineinfile: dest=/etc/hosts regexp='{{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}}' line="127.0.0.1 {{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}}"
+      with_sequence: start=0 end={{NNODES-1}}
+    - lineinfile: dest=/etc/hosts regexp='{{ hostvars[item]['IM_NODE_HOSTNAME'] }}' line='{{item}} {{ hostvars[item]['IM_NODE_FQDN'] }} {{ hostvars[item]['IM_NODE_HOSTNAME'] }}'
+      with_items: groups.all
+
+    # Install ansible for the IM
+    - name: Apt install requirements
+      action: apt pkg=python-mysqldb,unzip,python-pip
+      when: debian_os
+
+    - name: Yum install requirements REL
+      action: yum pkg=MySQL-python,unzip,python-distribute,python-babel,python-crypto,python-jinja2
+      when: redhat_os
+      
+    - name: Install Pip
+      action: command easy_install pip==1.4.1 creates=/usr/local/bin/pip
+    
+    - name: Install ansible with Pip
+      pip: name=ansible version=1.5.3
+      
+    - name: Disable SELinux
+      command: /usr/sbin/setenforce 0
+      when: redhat_os
+      ignore_errors: yes
+       
+    - name: Create /etc/ansible
+      file: path=/etc/ansible state=directory
+      
+    - name: Set host_key_checking to false in ansible.cfg
+      ini_file: dest=/etc/ansible/ansible.cfg section=defaults option=host_key_checking value=False
+      
+    - name: Set transport to paramiko in ansible.cfg
+      ini_file: dest=/etc/ansible/ansible.cfg section=defaults option=transport value=paramiko
+    
+    # Install el IM
+    - command: tar -xzf /tmp/{{IM_FILE}}.tar.gz -C /usr/local creates=/usr/local/{{IM_FILE}}
+    - file: src=/usr/local/{{IM_FILE}} dest=/usr/local/im state=link
+    - file: src=/usr/local/{{IM_FILE}} dest=/usr/local/im state=link
+    - file: src=/usr/local/im/im dest=/etc/init.d/im state=link
+    - file: path=/usr/local/im/log state=directory
+    
+    - ini_file: dest=/usr/local/im/etc/im.cfg section=im option=IM_PATH value=/usr/local/im
+    - ini_file: dest=/usr/local/im/etc/im.cfg section=im option=XMLRCP_PORT value=8899
+    
+    - service: name=im state=started
+
+    # CLUES installation
+    - command: tar -xzf /tmp/{{CLUES_FILE}}.tar.gz -C /usr/local creates=/usr/local/{{CLUES_FILE}}
+    - file: src=/usr/local/{{CLUES_FILE}} dest=/usr/local/clues state=link
+    - file: src=/usr/local/clues/clues dest=/etc/init.d/clues state=link
+    - command: tar -xzf /tmp/{{CLOUD_CONN_FILE}}.tar.gz -C /usr/local/clues/bin creates=/usr/local/clues/bin/{{CLOUD_CONN_FILE}}
+    - file: src=/usr/local/clues/bin/{{CLOUD_CONN_FILE}} dest=/usr/local/clues/bin/cloud state=link
+    - file: src=/usr/local/clues/bin/cloud/monitored_hook.py dest=/usr/local/clues/bin/hooks/monitored_hook.py state=link
+    
+    # CLUES Config file
+    - lineinfile: dest=/usr/local/clues/config.py regexp=HOOK_MONITORED line="HOOKS['HOOK_MONITORED']=('monitored_hook.py', True)"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^SECURITY_TOKEN_ENABLED line="SECURITY_TOKEN_ENABLED = False"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MAX_TIME_IDLE line="MAX_TIME_IDLE = 240"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MAX_TIME_BOOT line="MAX_TIME_BOOT = 600"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MAX_WAIT_JOB line="MAX_WAIT_JOB = 600"
+    
+    # CLOUD connector Config file
+    - lineinfile: dest=/usr/local/clues/bin/cloud/config.py regexp=^IM_URL line="IM_URL = 'http://{{ IM_MASTER_FQDN }}:8899'"
+    - copy: dest=/usr/local/clues/bin/cloud/wn.radl content="{{WN_RADL_SPECS}}"
+
+    - file: path=/usr/local/clues/bin/bootnode state=absent
+    - file: path=/usr/local/clues/bin/poweroff state=absent
+    - file: src=/usr/local/clues/bin/cloud/bootnode dest=/usr/local/clues/bin/bootnode state=link
+    - file: src=/usr/local/clues/bin/cloud/poweroff dest=/usr/local/clues/bin/poweroff state=link
