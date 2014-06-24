@@ -1,0 +1,93 @@
+    - command: hostname torqueserver
+
+    # Torque configuration Specific tasks
+    - name: Apt install Torque in Deb system
+      action: apt pkg=torque-server,torque-client,g++,libtorque2-dev,make
+      when: debian_os
+      
+    - name: Yum install Torque in REL system
+      action: yum pkg=torque-server,torque-client,openssh-clients,g++,make,libtorque-devel
+      when: redhat_os
+    
+    - command: /sbin/iptables -I INPUT 2 -p tcp --dport 15001:15004 -j ACCEPT
+      ignore_errors: yes
+    - command: /sbin/iptables -I INPUT 2 -p udp --dport 15001:15004 -j ACCEPT
+      ignore_errors: yes
+    - command: /sbin/iptables -I INPUT -p tcp --dport 15001:15004 -j ACCEPT
+      ignore_errors: yes
+    - command: /sbin/iptables -I INPUT -p udp --dport 15001:15004 -j ACCEPT
+      ignore_errors: yes
+
+    - lineinfile: dest={{TORQUE_PATH}}/torque.cfg regexp=^SUBMITFILTER line='SUBMITFILTER /usr/local/clues/plugins/pbs/wrapper.py' create=yes mode=644
+    - copy: dest=/etc/torque/server_name content=torqueserver
+    - template: src=/tmp/{{NODES_TEMPLATE}} dest={{TORQUE_PATH}}/server_priv/nodes
+
+    - service: name=torque-server state=restarted pattern=/usr/sbin/pbs_server
+      when: debian_os
+    - service: name=torque-server state=restarted pattern=/usr/sbin/pbs_server
+      when: debian_os
+    - service: name=pbs_server state=restarted pattern=/usr/sbin/pbs_server
+      when: redhat_os
+    - service: name=pbs_server state=restarted pattern=/usr/sbin/pbs_server
+      when: redhat_os
+
+    - service: name=torque-server state=started pattern=/usr/sbin/pbs_server
+      when: debian_os
+    - service: name=pbs_server state=started pattern=/usr/sbin/pbs_server
+      when: redhat_os
+
+    # MAUI 
+    - name: download maui package form Amazon S3
+      get_url: url=https://s3.amazonaws.com/amcaar/maui-3.3.1.tar.gz dest=/home/ubuntu/
+
+    - name: decompress maui package
+      command: tar -xzvf maui-3.3.1.tar.gz chdir=/home/ubuntu/ creates=/home/ubuntu/maui-3.3.1
+
+    - name: configure maui
+      command: ./configure --prefix=/usr/local/maui chdir=/home/ubuntu/maui-3.3.1/ creates=/home/ubuntu/maui-3.3.1/Makefile
+
+    - name: compile (make) maui
+      command: make chdir=/home/ubuntu/maui-3.3.1/ creates=chdir=/home/ubuntu/maui-3.3.1/bin/maui
+
+    - name: install maui
+      command: make install chdir=/home/ubuntu/maui-3.3.1/ creates=/usr/local/maui/maui.cfg
+
+    - name: kill maui if exists
+      shell: kill $(pgrep maui)
+      ignore_errors: yes
+
+    - name: start maui daemon
+      shell: /usr/local/maui/sbin/maui
+
+    - name: add maui commands to the bash
+      shell: echo 'export PATH=$PATH:/usr/local/maui/bin' >> /etc/profile
+
+    - lineinfile: dest=/usr/local/maui/maui.cfg regexp=DEFERTIME line='DEFERTIME  0:00:00'
+
+    # Fin MAUI
+
+    - command: /usr/sbin/create-munge-key creates=/etc/munge/munge.key
+      when: redhat_os
+      notify:
+      - restart munge
+      - restart clues
+    - file: path=/etc/munge/munge.key owner=munge group=munge mode=0400
+      when: redhat_os
+      notify:
+      - restart munge
+      - restart clues
+
+    - shell: echo "{{PBS_SERVER_CONF}}" | qmgr creates={{TORQUE_PATH}}/server_priv/queues/batch
+
+    # PBS plugin installation
+    - command: tar -xzf /tmp/{{PLUGIN_FILE}}.tar.gz -C /usr/local/clues/plugins creates=/usr/local/clues/plugins/{{PLUGIN_FILE}}
+    - file: src=/usr/local/clues/plugins/{{PLUGIN_FILE}} dest=/usr/local/clues/plugins/pbs state=link
+    # and configuration
+    - lineinfile: dest=/usr/local/clues/plugins/pbs/config.py regexp=^TORQUE_BIN_PATH line='TORQUE_BIN_PATH="/usr/bin"'
+    - lineinfile: dest=/usr/local/clues/plugins/pbs/config.py regexp=^DEFAULT_QUEUE line='DEFAULT_QUEUE="batch"'
+    # CLUES specific values for pbs plugin
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MANAGERS line="MANAGERS=['pbs']"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^NODES_AVAILABLE..pbs.. line="NODES_AVAILABLE['pbs'] = 0"
+    # CLUES CLOUD specific values for pbs plugin
+    - lineinfile: dest=/usr/local/clues/bin/cloud/config.py regexp=^CONFIGURE_FILE line="CONFIGURE_FILE = '/tmp/conf/torquewn.yml'"
+    

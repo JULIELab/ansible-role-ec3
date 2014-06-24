@@ -1,0 +1,57 @@
+    # SGE configuration Specific tasks
+    
+    - name: prevent the sge install dialogs
+      shell: echo {{ item }} | debconf-set-selections
+      with_items:
+      - "* shared/gridenginemaster select sgemaster"
+      - "* shared/gridenginecell select default"
+      - "* shared/gridengineconfig select true"
+      - "* postfix/main_mailer_type select No configuration"
+      when: debian_os
+  
+    - name: Apt install SGE in Deb system
+      action: apt pkg=gridengine-common,gridengine-client,gridengine-master
+      when: debian_os
+      
+    - name: Yum install SGE in REL system
+      action: yum pkg=gridengine,gridengine-qmaster,gridengine-execd
+      when: redhat_os
+      
+    - template: src=/tmp/allhosts.hgrp dest=/tmp/allhosts.hgrp.dat
+    - template: src=/tmp/all.q dest=/tmp/all.q.dat
+
+    - name: Configure SGE in REL system
+      action: command {{SGE_ROOT}}/install_qmaster -auto {{SGE_ROOT}}/my_configuration.conf chdir={{SGE_ROOT}} creates={{SGE_ROOT}}/default
+      when: redhat_os
+      environment:
+        SGE_ROOT: "{{SGE_ROOT}}"
+
+    - command: qconf -as sgeserver.i3m.upv.es
+
+    - copy: dest=/tmp/{{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}}.def content="hostname {{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}}.localdomain {{NODE_DEF}}"
+      with_sequence: start=0 end={{NNODES-1}}
+
+    - shell: qconf -se {{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}} || qconf -Ae /tmp/{{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}}.def
+      with_sequence: start=0 end={{NNODES-1}}
+      
+    - shell: qconf -ah {{VNODES_PREFIX}}{{item}}{{VNODES_SUFFIX}}
+      with_sequence: start=0 end={{NNODES-1}}
+
+    - shell: qconf -shgrp @allhosts || qconf -Ahgrp /tmp/allhosts.hgrp.dat
+    - shell: qconf -sq all.q || qconf -Aq /tmp/all.q.dat
+    
+    - lineinfile: dest={{SGE_ROOT}}/default/common/sge_request regexp='^-jsv' line="-jsv /usr/local/clues/plugins/sge/wrapper.py" create=yes mode=644
+    - lineinfile: dest=/etc/profile.d/sge_vars.sh regexp='SGE_JSV_TIMEOUT' line="export SGE_JSV_TIMEOUT=600" create=yes mode=755
+
+    # SGE plugin installation
+    - command: tar -xzf /tmp/{{PLUGIN_FILE}}.tar.gz -C /usr/local/clues/plugins creates=/usr/local/clues/plugins/{{PLUGIN_FILE}}
+    - file: src=/usr/local/clues/plugins/{{PLUGIN_FILE}} dest=/usr/local/clues/plugins/sge state=link
+    # and configuration
+    - lineinfile: dest=/usr/local/clues/plugins/sge/config.py regexp=^SGE_ROOT line='SGE_ROOT = "{{SGE_ROOT}}"'
+    - lineinfile: dest=/usr/local/clues/plugins/sge/config.py regexp=^SGE_BIN line='SGE_BIN = SGE_ROOT + "/bin/lx26-amd64"'
+    - lineinfile: dest=/usr/local/clues/plugins/sge/config.py regexp=^DEFAULT_QUEUE line='DEFAULT_QUEUE="all.q"'
+    # CLUES specific values for sge plugin
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MANAGERS line="MANAGERS=['sge']"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^NODES_AVAILABLE..pbs.. line="NODES_AVAILABLE['sge'] = 0"
+    # CLUES CLOUD specific values for pbs plugin
+    - lineinfile: dest=/usr/local/clues/bin/cloud/config.py regexp=^CONFIGURE_FILE line="CONFIGURE_FILE = '/tmp/conf/sgewn.yml'"
