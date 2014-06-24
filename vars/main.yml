@@ -1,1 +1,2 @@
 lrms: slurm
+type_of_node : wn
