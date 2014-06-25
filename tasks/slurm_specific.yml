@@ -1,3 +1,13 @@
+    # CLOUD connector Config file
+    - lineinfile: dest=/usr/local/clues/bin/cloud/config.py regexp=^CONFIGURE_WN_TIMEOUT line="CONFIGURE_WN_TIMEOUT=1500"
+    - lineinfile: dest=/usr/local/clues/bin/cloud/config.py regexp=^RUNNING_WN_TIMEOUT line="RUNNING_WN_TIMEOUT=500"
+
+    # CLUES Config file
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MAX_TIME_BOOT line="MAX_TIME_BOOT = 1600"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^MAX_WAIT_JOB line="MAX_WAIT_JOB = 1600"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^SWITCH_ON_BLOCKSIZE line="SWITCH_ON_BLOCKSIZE = 1"
+    - lineinfile: dest=/usr/local/clues/config.py regexp=^TIME_TO_EVALUATE line="TIME_TO_EVALUATE = 30"
+    
     # SLURM plugin installation
     - command: tar -xzf /tmp/{{PLUGIN_FILE}}.tar.gz -C /usr/local/clues/plugins creates=/usr/local/clues/plugins/{{PLUGIN_FILE}}
     - file: src=/usr/local/clues/plugins/{{PLUGIN_FILE}} dest=/usr/local/clues/plugins/slurm state=link
